@@ -1,7 +1,6 @@
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
 from telegram import ReplyKeyboardMarkup
 import datetime
-import matplotlib.pyplot as plt
 
 # -----------------------------
 # CONSTANTS
@@ -220,33 +219,6 @@ def reminder(context):
 
 
 # -----------------------------
-# /graph
-# -----------------------------
-def graph_resources(update, context):
-    user_data = context.user_data
-    init_user(user_data)
-
-    dungeons = ["Hammer", "Ghost", "Invasion", "Zombie"]
-    values = [
-        user_data["hammer_resources"],
-        user_data["ghost_resources"],
-        user_data["invasion_resources"],
-        user_data["zombie_resources"]
-    ]
-
-    plt.figure(figsize=(8,5))
-    plt.bar(dungeons, values, color=["red","blue","green","purple"])
-    plt.title("Dungeon Resources")
-    plt.xlabel("Dungeon")
-    plt.ylabel("Total Resources")
-
-    plt.savefig("resources.png")
-    plt.close()
-
-    update.message.reply_photo(photo=open("resources.png", "rb"))
-
-
-# -----------------------------
 # MAIN
 # -----------------------------
 def main():
@@ -280,7 +252,6 @@ def main():
     dp.add_handler(CommandHandler("stats", stats))
     dp.add_handler(CommandHandler("setwin", setwin))
     dp.add_handler(CommandHandler("setlose", setlose))
-    dp.add_handler(CommandHandler("graph", graph_resources))
     dp.add_handler(asc_handler)
     dp.add_handler(upd_handler)
 
