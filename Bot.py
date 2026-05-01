@@ -1,278 +1,305 @@
-import sqlite3
-import logging
-import re
-from telegram import Update, ReplyKeyboardRemove
-from telegram.ext import (
-    Updater, CommandHandler, MessageHandler,
-    Filters, ConversationHandler, CallbackContext
-)
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
+from telegram import ReplyKeyboardMarkup
+import datetime
+import matplotlib.pyplot as plt
 
-# --- CONFIG ---
-TOKEN = "8719290481:AAFFYUVZMIpXD9dGbQ4ZUEs3r9xsS2tWGh0"
-ID_CANALE = "-1003578874292"
+# -----------------------------
+# CONSTANTS
+# -----------------------------
+DUNGEONS = ["hammer", "ghost", "invasion", "zombie"]
 
-# Stati
-POTENZA, FORGIA, TEMPO_OFF, D1, D2, D3, D4, RIS_UPDATE, V_H, V_S, V_P, V_O = range(12)
-
-logging.basicConfig(level=logging.ERROR)
-
-DB_PATH = "forge_master.db"
+UPD_HAMMER, UPD_GHOST, UPD_INV, UPD_ZOMBIE = range(4)
+ASC_PET, ASC_MOUNT, ASC_SKILL = range(3)
 
 
-# --- DB ---
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS player_data (
-                user_id INTEGER PRIMARY KEY,
-                potenza TEXT,
-                m_min REAL,
-                o_sec REAL,
-                h_max REAL,
-                d1_s INTEGER, d1_b INTEGER,
-                d2_s INTEGER, d2_b INTEGER,
-                d3_s INTEGER, d3_b INTEGER,
-                d4_s INTEGER, d4_b INTEGER,
-                risorse TEXT
+# -----------------------------
+# INIT USER DATA
+# -----------------------------
+def init_user(user_data):
+    for d in DUNGEONS:
+        user_data.setdefault(f"{d}_stage", 1)
+        user_data.setdefault(f"{d}_battles", 0)
+        user_data.setdefault(f"{d}_resources", 0)
+        user_data.setdefault(f"{d}_wins_today", 0)
+
+    user_data.setdefault("war_mode", "win")
+    user_data.setdefault("pet_drop", 0)
+    user_data.setdefault("mount_drop", 0)
+    user_data.setdefault("skill_reduction", 0)
+
+
+# -----------------------------
+# /start
+# -----------------------------
+def start(update, context):
+    user_data = context.user_data
+    init_user(user_data)
+    user_data["chat_id"] = update.message.chat_id
+
+    text = (
+        "👋 Welcome!\n\n"
+        "Available commands:\n\n"
+        "/start – Show all commands\n"
+        "/stats – Show all your saved data\n"
+        "/setwin – Set war rewards for WIN\n"
+        "/setlose – Set war rewards for LOSE\n"
+        "/ascension – Interactive ascension calculator\n"
+        "/update – Update dungeon wins, stages and resources\n"
+        "/graph – Show resources graph\n"
+    )
+
+    update.message.reply_text(text)
+
+
+# -----------------------------
+# /setwin /setlose
+# -----------------------------
+def setwin(update, context):
+    context.user_data["war_mode"] = "win"
+    update.message.reply_text("War mode set to WIN.")
+
+def setlose(update, context):
+    context.user_data["war_mode"] = "lose"
+    update.message.reply_text("War mode set to LOSE.")
+
+
+# -----------------------------
+# /stats
+# -----------------------------
+def stats(update, context):
+    user_data = context.user_data
+    init_user(user_data)
+
+    msg = "📊 YOUR STATS\n\n"
+
+    for d in DUNGEONS:
+        msg += (
+            f"🏰 {d.capitalize()}\n"
+            f"Stage: {user_data[f'{d}_stage']}\n"
+            f"Battles: {user_data[f'{d}_battles']}/15\n"
+            f"Resources: {user_data[f'{d}_resources']}\n\n"
+        )
+
+    msg += f"War mode: {user_data['war_mode']}\n"
+    msg += f"Pet drop: {user_data['pet_drop']}%\n"
+    msg += f"Mount drop: {user_data['mount_drop']}%\n"
+    msg += f"Skill reduction: {user_data['skill_reduction']}%\n"
+
+    update.message.reply_text(msg)
+
+
+# -----------------------------
+# ASCENSION (INTERACTIVE)
+# -----------------------------
+def ascension(update, context):
+    update.message.reply_text("Enter your Pet Double Drop Chance (max 50%):")
+    return ASC_PET
+
+def asc_pet(update, context):
+    v = int(update.message.text)
+    if v > 50:
+        update.message.reply_text("Max allowed is 50%. Try again.")
+        return ASC_PET
+    context.user_data["pet_drop"] = v
+    update.message.reply_text("Enter your Mount Double Drop Chance (max 50%):")
+    return ASC_MOUNT
+
+def asc_mount(update, context):
+    v = int(update.message.text)
+    if v > 50:
+        update.message.reply_text("Max allowed is 50%. Try again.")
+        return ASC_MOUNT
+    context.user_data["mount_drop"] = v
+    update.message.reply_text("Enter your Skill Cost Reduction (max 25%):")
+    return ASC_SKILL
+
+def asc_skill(update, context):
+    v = int(update.message.text)
+    if v > 25:
+        update.message.reply_text("Max allowed is 25%. Try again.")
+        return ASC_SKILL
+
+    context.user_data["skill_reduction"] = v
+    update.message.reply_text("Ascension data saved.")
+    return ConversationHandler.END
+
+
+# -----------------------------
+# /update (INTERACTIVE)
+# -----------------------------
+def update_cmd(update, context):
+    init_user(context.user_data)
+    update.message.reply_text("How many wins today in Hammer Thief? (0–2)")
+    return UPD_HAMMER
+
+def upd_hammer(update, context):
+    context.user_data["hammer_wins_today"] = int(update.message.text)
+    update.message.reply_text("How many wins today in Ghost Town? (0–2)")
+    return UPD_GHOST
+
+def upd_ghost(update, context):
+    context.user_data["ghost_wins_today"] = int(update.message.text)
+    update.message.reply_text("How many wins today in Invasion? (0–2)")
+    return UPD_INV
+
+def upd_inv(update, context):
+    context.user_data["invasion_wins_today"] = int(update.message.text)
+    update.message.reply_text("How many wins today in Zombie Rush? (0–2)")
+    return UPD_ZOMBIE
+
+def upd_zombie(update, context):
+    msg = "🏰 DUNGEON UPDATE\n\n"
+
+    for d in DUNGEONS:
+        wins_today = context.user_data[f"{d}_wins_today"]
+        old_stage = context.user_data[f"{d}_stage"]
+        old_battles = context.user_data[f"{d}_battles"]
+        old_resources = context.user_data[f"{d}_resources"]
+
+        # Update battles
+        new_battles = old_battles + wins_today
+        stage_up = False
+
+        if new_battles >= 15:
+            new_battles -= 15
+            new_stage = old_stage + 1
+            stage_up = True
+        else:
+            new_stage = old_stage
+
+        # Resources
+        resources_today = wins_today * 5
+        new_resources = old_resources + resources_today
+
+        # Save
+        context.user_data[f"{d}_stage"] = new_stage
+        context.user_data[f"{d}_battles"] = new_battles
+        context.user_data[f"{d}_resources"] = new_resources
+
+        # Report
+        msg += f"🏰 {d.capitalize()}\n"
+        msg += f"Wins today: {wins_today}\n"
+        msg += f"Resources gained: {' + '.join(['5']*wins_today) if wins_today>0 else '0'} = {resources_today}\n"
+        msg += f"Total resources: {old_resources} + {resources_today} = {new_resources}\n"
+        msg += f"Stage: {old_stage} → {new_stage}\n"
+        msg += f"Battles: {old_battles} + {wins_today} = {old_battles + wins_today}"
+        if stage_up:
+            msg += f" → {new_battles} (stage up)"
+        msg += "\n\n"
+
+    update.message.reply_text(msg)
+    return ConversationHandler.END
+
+
+# -----------------------------
+# DAILY RESET (00:00)
+# -----------------------------
+def daily_reset(context):
+    user_data = context.job.context
+    for d in DUNGEONS:
+        user_data[f"{d}_wins_today"] = 0
+
+    context.bot.send_message(
+        chat_id=user_data["chat_id"],
+        text="🔄 Daily reset completed. Wins today set to 0."
+    )
+
+
+# -----------------------------
+# REMINDER AT 20:00
+# -----------------------------
+def reminder(context):
+    user_data = context.job.context
+    for d in DUNGEONS:
+        if user_data.get(f"{d}_wins_today", 0) < 2:
+            context.bot.send_message(
+                chat_id=user_data["chat_id"],
+                text="⚠️ You still have dungeon attacks available today!"
             )
-        """)
+            break
 
 
-# --- Parsing helpers ---
-def estrai_numeri(testo: str):
-    return re.findall(r"\d+(?:[.,]\d+)?", testo.replace(',', '.'))
+# -----------------------------
+# /graph
+# -----------------------------
+def graph_resources(update, context):
+    user_data = context.user_data
+    init_user(user_data)
+
+    dungeons = ["Hammer", "Ghost", "Invasion", "Zombie"]
+    values = [
+        user_data["hammer_resources"],
+        user_data["ghost_resources"],
+        user_data["invasion_resources"],
+        user_data["zombie_resources"]
+    ]
+
+    plt.figure(figsize=(8,5))
+    plt.bar(dungeons, values, color=["red","blue","green","purple"])
+    plt.title("Dungeon Resources")
+    plt.xlabel("Dungeon")
+    plt.ylabel("Total Resources")
+
+    plt.savefig("resources.png")
+    plt.close()
+
+    update.message.reply_photo(photo=open("resources.png", "rb"))
 
 
-def to_float(s: str):
-    return float(s)
-
-
-def parse_two_ints(text: str):
-    t = text.strip()
-    t = re.sub(r"\s+", " ", t)
-
-    m = re.match(r"^(\d+)[\s\.\-]+(\d+)$", t)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-
-    m = re.match(r"^(\d+)$", t)
-    if m:
-        return int(m.group(1)), 0
-
-    return None, None
-
-
-def calcola_progressione(stage, battaglie_attuali, nuove_vincite):
-    totale = int(battaglie_attuali) + int(nuove_vincite)
-    nuovo_stage = int(stage)
-    if totale >= 15:
-        nuovo_stage += 1
-        totale -= 15
-    return nuovo_stage, totale
-
-
-def valid_0_1_2(text: str):
-    return text in {"0", "1", "2"}
-
-
-# --- HANDLERS ---
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "⚙️ CONFIGURAZIONE\n"
-        "Inserisci la **Potenza** (testo o numero):"
-    )
-    return POTENZA
-
-
-def get_potenza(update: Update, context: CallbackContext):
-    context.user_data["potenza"] = update.message.text.strip()
-    update.message.reply_text("⚒ FORGIA: Martelli/min e Oro/sec? (Max 2.0) - es: 1.2 1.5")
-    return FORGIA
-
-
-def get_forgia(update: Update, context: CallbackContext):
-    n = estrai_numeri(update.message.text)
-    if not n:
-        update.message.reply_text("⚠️ Inserisci numeri validi. Reinserisci:")
-        return FORGIA
-
-    m = to_float(n[0])
-    o = to_float(n[1]) if len(n) > 1 else m
-
-    if m > 2.0 or o > 2.0:
-        update.message.reply_text("⚠️ Max 2.0! Reinserisci:")
-        return FORGIA
-
-    context.user_data["m_min"] = m
-    context.user_data["o_sec"] = o
-    update.message.reply_text("⏳ OFFLINE: Ore (0-24)? es: 8")
-    return TEMPO_OFF
-
-
-def get_tempo(update: Update, context: CallbackContext):
-    n = estrai_numeri(update.message.text)
-    if not n:
-        update.message.reply_text("⚠️ Inserisci un numero ore (0-24).")
-        return TEMPO_OFF
-
-    ore = to_float(n[0])
-    if not (0 <= ore <= 24):
-        update.message.reply_text("⚠️ Ore fuori range (0-24). Riprova:")
-        return TEMPO_OFF
-
-    context.user_data["h_max"] = ore
-    update.message.reply_text("🏰 HAMMER Stage.Battaglia (es: 1-0 oppure 2.3):")
-    return D1
-
-
-def get_d1(update: Update, context: CallbackContext):
-    s, b = parse_two_ints(update.message.text)
-    if s is None:
-        update.message.reply_text("⚠️ Formato non valido per D1. Es: 1-0 o 2.3")
-        return D1
-    context.user_data["d1"] = [s, b]
-    update.message.reply_text("🏰 SKILL Stage.Battaglia:")
-    return D2
-
-
-def get_d2(update: Update, context: CallbackContext):
-    s, b = parse_two_ints(update.message.text)
-    if s is None:
-        update.message.reply_text("⚠️ Formato non valido per D2. Es: 1-0 o 2.3")
-        return D2
-    context.user_data["d2"] = [s, b]
-    update.message.reply_text("🏰 PET Stage.Battaglia:")
-    return D3
-
-
-def get_d3(update: Update, context: CallbackContext):
-    s, b = parse_two_ints(update.message.text)
-    if s is None:
-        update.message.reply_text("⚠️ Formato non valido per D3. Es: 1-0 o 2.3")
-        return D3
-    context.user_data["d3"] = [s, b]
-    update.message.reply_text("🏰 POTION Stage.Battaglia:")
-    return D4
-
-
-def get_d4(update: Update, context: CallbackContext):
-    s, b = parse_two_ints(update.message.text)
-    if s is None:
-        update.message.reply_text("⚠️ Formato non valido per D4. Es: 1-0 o 2.3")
-        return D4
-
-    required = ["potenza", "m_min", "o_sec", "h_max", "d1", "d2", "d3"]
-    if any(k not in context.user_data for k in required):
-        update.message.reply_text("⚠️ Config incompleta. Riprova con /start.")
-        return ConversationHandler.END
-
-    uid = update.message.from_user.id
-    d1 = context.user_data["d1"]
-    d2 = context.user_data["d2"]
-    d3 = context.user_data["d3"]
-
-    # Salva D4
-    context.user_data["d4"] = [s, b]
-    d4 = context.user_data["d4"]
-
-    # Salvataggio nel DB
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO player_data (
-                user_id, potenza, m_min, o_sec, h_max,
-                d1_s, d1_b, d2_s, d2_b, d3_s, d3_b, d4_s, d4_b, risorse
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            uid,
-            context.user_data["potenza"],
-            context.user_data["m_min"],
-            context.user_data["o_sec"],
-            context.user_data["h_max"],
-            d1[0], d1[1],
-            d2[0], d2[1],
-            d3[0], d3[1],
-            d4[0], d4[1],
-            "N/A"
-        ))
-
-    update.message.reply_text("✅ Configurazione salvata!")
-
-    # Invia al canale
-    testo = (
-        f"⚙️ NUOVA CONFIG\n"
-        f"👤 Utente: {uid}\n"
-        f"💥 Potenza: {context.user_data['potenza']}\n"
-        f"⚒ Martelli/min: {context.user_data['m_min']}\n"
-        f"💰 Oro/sec: {context.user_data['o_sec']}\n"
-        f"⏳ Ore offline: {context.user_data['h_max']}\n"
-        f"🏰 D1: {d1[0]}-{d1[1]}\n"
-        f"🏰 D2: {d2[0]}-{d2[1]}\n"
-        f"🏰 D3: {d3[0]}-{d3[1]}\n"
-        f"🏰 D4: {d4[0]}-{d4[1]}"
-    )
-
-    context.bot.send_message(chat_id=ID_CANALE, text=testo)
-
-    return ConversationHandler.END
-
-
-def cancel(update: Update, context: CallbackContext):
-    update.message.reply_text("❌ Configurazione annullata.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-
+# -----------------------------
+# MAIN
+# -----------------------------
 def main():
-    init_db()
-
-    updater = Updater(TOKEN, use_context=True)
+    updater = Updater("YOUR_TOKEN", use_context=True)
     dp = updater.dispatcher
 
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+    # ASCENSION HANDLER
+    asc_handler = ConversationHandler(
+        entry_points=[CommandHandler("ascension", ascension)],
         states={
-            POTENZA: [MessageHandler(Filters.text & ~Filters.command, get_potenza)],
-            FORGIA: [MessageHandler(Filters.text & ~Filters.command, get_forgia)],
-            TEMPO_OFF: [MessageHandler(Filters.text & ~Filters.command, get_tempo)],
-            D1: [MessageHandler(Filters.text & ~Filters.command, get_d1)],
-            D2: [MessageHandler(Filters.text & ~Filters.command, get_d2)],
-            D3: [MessageHandler(Filters.text & ~Filters.command, get_d3)],
-            D4: [MessageHandler(Filters.text & ~Filters.command, get_d4)],
+            ASC_PET: [MessageHandler(Filters.text, asc_pet)],
+            ASC_MOUNT: [MessageHandler(Filters.text, asc_mount)],
+            ASC_SKILL: [MessageHandler(Filters.text, asc_skill)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[]
     )
 
-    dp.add_handler(conv)
+    # UPDATE HANDLER
+    upd_handler = ConversationHandler(
+        entry_points=[CommandHandler("update", update_cmd)],
+        states={
+            UPD_HAMMER: [MessageHandler(Filters.text, upd_hammer)],
+            UPD_GHOST: [MessageHandler(Filters.text, upd_ghost)],
+            UPD_INV: [MessageHandler(Filters.text, upd_inv)],
+            UPD_ZOMBIE: [MessageHandler(Filters.text, upd_zombie)],
+        },
+        fallbacks=[]
+    )
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("stats", stats))
+    dp.add_handler(CommandHandler("setwin", setwin))
+    dp.add_handler(CommandHandler("setlose", setlose))
+    dp.add_handler(CommandHandler("graph", graph_resources))
+    dp.add_handler(asc_handler)
+    dp.add_handler(upd_handler)
+
+    # DAILY RESET AT 00:00
+    updater.job_queue.run_daily(
+        daily_reset,
+        time=datetime.time(hour=0, minute=0, second=0),
+        context=dp.user_data
+    )
+
+    # REMINDER AT 20:00
+    updater.job_queue.run_daily(
+        reminder,
+        time=datetime.time(hour=20, minute=0, second=0),
+        context=dp.user_data
+    )
 
     updater.start_polling()
     updater.idle()
-    
-    import re
-
-def parse_dungeon(value: str):
-    value = value.strip()
-
-    # 1) Formato con punto → 1.1 → 01-01
-    if re.match(r"^\d{1,2}\.\d{1,2}$", value):
-        a, b = value.split(".")
-        return f"{int(a):02d}-{int(b):02d}"
-
-    # 2) Formato con trattino → 01-01
-    if re.match(r"^\d{1,2}-\d{1,2}$", value):
-        a, b = value.split("-")
-        return f"{int(a):02d}-{int(b):02d}"
-
-    # 3) Due numeri separati da spazio → 11 1 → 11-01
-    if re.match(r"^\d{1,2}\s\d{1,2}$", value):
-        a, b = value.split()
-        return f"{int(a):02d}-{int(b):02d}"
-
-    # 4) Numero singolo → 8 → 08-00
-    if re.match(r"^\d{1,2}$", value):
-        a = int(value)
-        return f"{a:02d}-00"
-
-    # ❌ Non valido
-    return None
 
 
 if __name__ == "__main__":
