@@ -118,7 +118,7 @@ def main():
     # Persistenza dati su file
     pers = PicklePersistence(filepath="warriors_database.pickle")
     
-    app = Application.builder().token("TUO_TOKEN_QUI").persistence(pers).build()
+    app = Application.builder().token("8719290481:AAEVRqfRK-vC7jXsJumH6jmWiIbfmZj_mmg").persistence(pers).build()
 
     # ConversationHandlers (Setup, Strength, Update, Ascension)
     # [Qui vanno aggiunti i ConversationHandler come nel codice precedente]
