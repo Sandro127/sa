@@ -245,6 +245,34 @@ def main():
 
     updater.start_polling()
     updater.idle()
+    
+    import re
+
+def parse_dungeon(value: str):
+    value = value.strip()
+
+    # 1) Formato con punto → 1.1 → 01-01
+    if re.match(r"^\d{1,2}\.\d{1,2}$", value):
+        a, b = value.split(".")
+        return f"{int(a):02d}-{int(b):02d}"
+
+    # 2) Formato con trattino → 01-01
+    if re.match(r"^\d{1,2}-\d{1,2}$", value):
+        a, b = value.split("-")
+        return f"{int(a):02d}-{int(b):02d}"
+
+    # 3) Due numeri separati da spazio → 11 1 → 11-01
+    if re.match(r"^\d{1,2}\s\d{1,2}$", value):
+        a, b = value.split()
+        return f"{int(a):02d}-{int(b):02d}"
+
+    # 4) Numero singolo → 8 → 08-00
+    if re.match(r"^\d{1,2}$", value):
+        a = int(value)
+        return f"{a:02d}-00"
+
+    # ❌ Non valido
+    return None
 
 
 if __name__ == "__main__":
