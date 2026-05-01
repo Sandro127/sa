@@ -222,7 +222,7 @@ def reminder(context):
 # MAIN
 # -----------------------------
 def main():
-    updater = Updater("YOUR_TOKEN", use_context=True)
+    updater = Updater("8719290481:AAFFYUVZMIpXD9dGbQ4ZUEs3r9xsS2tWGh0", use_context=True)
     dp = updater.dispatcher
 
     # ASCENSION HANDLER
