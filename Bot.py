@@ -25,13 +25,14 @@ def init_player(bot_data, user_id, name):
             "mount_drop": 0,
             "skill_reduction": 0,
             "war_mode": "win",
+            "last_update": None
         }
 
         for d in DUNGEONS:
             bot_data["players"][user_id][f"{d}_stage"] = 1
             bot_data["players"][user_id][f"{d}_battles"] = 0
             bot_data["players"][user_id][f"{d}_resources"] = 0
-            bot_data["players"][user_id][f"{d}_wins_today"] = 0
+            bot_data["players"][user_id][f"{d}_wins_today"] = None  # None = non ha giocato
 
 
 # -----------------------------
@@ -66,11 +67,15 @@ def stats(update, context):
     msg = f"📊 STATS FOR {p['name']}\n\n"
 
     for d in DUNGEONS:
+        wins = p[f"{d}_wins_today"]
+        wins_text = wins if wins is not None else "Not played"
+
         msg += (
             f"🏰 {d.capitalize()}\n"
             f"Stage: {p[f'{d}_stage']}\n"
             f"Battles: {p[f'{d}_battles']}/15\n"
-            f"Resources: {p[f'{d}_resources']}\n\n"
+            f"Resources: {p[f'{d}_resources']}\n"
+            f"Wins today: {wins_text}\n\n"
         )
 
     msg += f"War mode: {p['war_mode']}\n"
@@ -137,25 +142,62 @@ def asc_skill(update, context):
 # /update (INTERACTIVE)
 # -----------------------------
 def update_cmd(update, context):
+    user_id = update.message.from_user.id
+    p = context.bot_data["players"][user_id]
+
+    today = datetime.date.today().isoformat()
+
+    if p["last_update"] == today:
+        update.message.reply_text("You already used /update today. Come back tomorrow.")
+        return ConversationHandler.END
+
     update.message.reply_text("Wins today in Hammer Thief? (0–2)")
     return UPD_HAMMER
 
+
+def validate_win(value):
+    try:
+        v = int(value)
+        return v in [0, 1, 2]
+    except:
+        return False
+
+
 def upd_hammer(update, context):
+    if not validate_win(update.message.text):
+        update.message.reply_text("Invalid value. Enter 0, 1 or 2.")
+        return UPD_HAMMER
+
     context.user_data["hammer_wins"] = int(update.message.text)
     update.message.reply_text("Wins today in Ghost Town? (0–2)")
     return UPD_GHOST
 
+
 def upd_ghost(update, context):
+    if not validate_win(update.message.text):
+        update.message.reply_text("Invalid value. Enter 0, 1 or 2.")
+        return UPD_GHOST
+
     context.user_data["ghost_wins"] = int(update.message.text)
     update.message.reply_text("Wins today in Invasion? (0–2)")
     return UPD_INV
 
+
 def upd_inv(update, context):
+    if not validate_win(update.message.text):
+        update.message.reply_text("Invalid value. Enter 0, 1 or 2.")
+        return UPD_INV
+
     context.user_data["invasion_wins"] = int(update.message.text)
     update.message.reply_text("Wins today in Zombie Rush? (0–2)")
     return UPD_ZOMBIE
 
+
 def upd_zombie(update, context):
+    if not validate_win(update.message.text):
+        update.message.reply_text("Invalid value. Enter 0, 1 or 2.")
+        return UPD_ZOMBIE
+
     user_id = update.message.from_user.id
     p = context.bot_data["players"][user_id]
 
@@ -166,6 +208,17 @@ def upd_zombie(update, context):
         "zombie": context.user_data["zombie_wins"],
     }
 
+    # ❗ LOGICA FINALE: l’utente può aggiornare SOLO se ha usato entrambi i tentativi
+    # Vittorie = 0,1,2 → tentativi usati = 2
+    # Se un dungeon NON ha giocato → wins_today = None → BLOCCO
+
+    for d in DUNGEONS:
+        if wins[d] is None:
+            update.message.reply_text("You still have unused dungeon attacks today.")
+            return ConversationHandler.END
+
+    # Tutti i dungeon hanno usato i 2 tentativi → OK
+
     msg = "🏰 DUNGEON UPDATE\n\n"
 
     for d in DUNGEONS:
@@ -174,7 +227,8 @@ def upd_zombie(update, context):
         old_battles = p[f"{d}_battles"]
         old_res = p[f"{d}_resources"]
 
-        new_battles = old_battles + w
+        # Tentativi usati = 2 sempre
+        new_battles = old_battles + 2
         stage_up = False
 
         if new_battles >= 15:
@@ -190,18 +244,21 @@ def upd_zombie(update, context):
         p[f"{d}_stage"] = new_stage
         p[f"{d}_battles"] = new_battles
         p[f"{d}_resources"] = new_res
+        p[f"{d}_wins_today"] = w
 
         msg += (
             f"🏰 {d.capitalize()}\n"
             f"Wins: {w}\n"
-            f"Resources: {' + '.join(['5']*w) if w>0 else '0'} = {gained}\n"
-            f"Total: {old_res} + {gained} = {new_res}\n"
+            f"Resources gained: {gained}\n"
+            f"Total: {new_res}\n"
             f"Stage: {old_stage} → {new_stage}\n"
-            f"Battles: {old_battles} + {w} = {old_battles+w}"
+            f"Battles: {old_battles} + 2 = {new_battles}"
         )
         if stage_up:
-            msg += f" → {new_battles} (stage up)"
+            msg += " (stage up)"
         msg += "\n\n"
+
+    p["last_update"] = datetime.date.today().isoformat()
 
     update.message.reply_text(msg)
     return ConversationHandler.END
@@ -282,7 +339,7 @@ def leaderboard(update, context):
 def daily_reset(context):
     for p in context.bot_data.get("players", {}).values():
         for d in DUNGEONS:
-            p[f"{d}_wins_today"] = 0
+            p[f"{d}_wins_today"] = None
 
 
 # -----------------------------
@@ -291,7 +348,7 @@ def daily_reset(context):
 def reminder(context):
     for uid, p in context.bot_data.get("players", {}).items():
         for d in DUNGEONS:
-            if p[f"{d}_wins_today"] < 2:
+            if p[f"{d}_wins_today"] is None:
                 context.bot.send_message(
                     chat_id=uid,
                     text="⚠️ You still have dungeon attacks available today!"
