@@ -7,7 +7,11 @@ from telegram.ext import (
     filters,
     ContextTypes,
     ConversationHandler,
+    PicklePersistence,
 )
+
+# ID del Canale per i Log
+LOG_CHANNEL_ID = -1003578874292
 
 TARGETS = {
     "hammer": {"lvl": 47, "cost": 46000, "name": "Hammer Thief"},
@@ -18,195 +22,121 @@ TARGETS = {
 
 SETUP_CHOICE, SETUP_VALUE, UPD_WINS, ASC_INPUT, STRENGTH_INPUT = range(5)
 
-def get_p(context_data, user_id, name="Guerriero", force=0):
+# --- FUNZIONI CORE ---
+
+def get_p(context_data, user_id, username="Guerriero"):
     if "players" not in context_data: context_data["players"] = {}
     if user_id not in context_data["players"]:
         context_data["players"][user_id] = {
-            "name": name,
-            "force": force,
+            "name": username,
+            "force": 0,
             "asc": {"pet": 0, "mount": 0, "skill": 0},
             "d": {k: {"st": 1.0, "rew": 0} for k in TARGETS.keys()}
         }
     return context_data["players"][user_id]
 
 def calc_remaining(p, dkey):
-    if dkey not in TARGETS: return 0
     t = TARGETS[dkey]
     d = p["d"][dkey]
-    total = round(d["st"] * d["rew"])
-    gap = t["cost"] - total
-    if gap <= 0: return "TARGET RAGGIUNTO! ✅"
+    current_total = round(d["st"] * d["rew"])
+    gap = t["cost"] - current_total
     
+    if gap <= 0: return "RAGGIUNTO ✅"
+    
+    # Calcolo costo effettivo basato su Ascension
     if dkey == "ghost":
-        gap *= (1 - (p["asc"]["skill"] / 100))
+        # Skill riduce il costo totale necessario
+        eff_gap = gap * (1 - (p["asc"]["skill"] / 100))
     elif dkey == "invasion":
-        gap /= (1 + (p["asc"]["pet"] / 100))
+        # Pet aumenta il guadagno (quindi riduce il gap relativo)
+        eff_gap = gap / (1 + (p["asc"]["pet"] / 100))
     elif dkey == "hammer":
-        gap /= (1 + (p["asc"]["mount"] / 100))
+        # Mount aumenta il guadagno
+        eff_gap = gap / (1 + (p["asc"]["mount"] / 100))
+    else:
+        eff_gap = gap
         
-    return int(gap)
+    return int(eff_gap)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "⚔️ **We Are Warriors - Gilda Manager**\n\n"
-        "1. Usa /setup per impostare i tuoi dati iniziali.\n"
-        "2. Usa /strength per impostare la tua forza.\n"
-        "3. Usa /ascension per i tuoi bonus percentuale.\n"
-        "4. Ogni giorno usa /update per le vittorie.\n"
-        "5. Vedi i progressi con /stats.",
-        parse_mode="Markdown"
-    )
+async def send_log(context, message):
+    """Invia un log al canale specificato"""
+    try:
+        await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=message, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Errore invio log: {e}")
+
+# --- HANDLERS COMANDI ---
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if "players" not in context.bot_data or uid not in context.bot_data["players"]:
-        await update.message.reply_text("Profilo non trovato. Usa /setup.")
-        return
+    p = get_p(context.bot_data, uid, update.effective_user.first_name)
     
-    p = context.bot_data["players"][uid]
-    msg = f"📊 **STATISTICHE DI {p['name'].upper()}**\n"
-    msg += f"💪 **Forza: {p['force']}**\n\n"
+    msg = f"📊 **PROGRESSI DI {p['name'].upper()}** (ID: `{uid}`)\n"
+    msg += f"💪 Forza attuale: `{p['force']}`\n\n"
     
-    for k, v in p["d"].items():
-        stage = int(v['st'])
-        battles = round((v['st'] - stage) * 100)
-        total = round(v['st'] * v['rew'])
-        mancano = calc_remaining(p, k)
-        msg += (f"🏰 **{TARGETS[k]['name']}**\n"
-                f"  └ Stage: `{stage}.{battles:02d}/15` | Risorse/Battaglia: `{v['rew']}`\n"
-                f"  └ Totale Risorse: `{total}` | Mancanti: `{mancano}`\n\n")
+    for k in TARGETS.keys():
+        v = p["d"][k]
+        mancanti = calc_remaining(p, k)
+        msg += (f"🏰 *{TARGETS[k]['name']}*\n"
+                f"  └ Stage: `{v['st']:.2f}` | Risorse: `{round(v['st']*v['rew'])}`/{TARGETS[k]['cost']}\n"
+                f"  └ **Mancante (Bonus Incl.): {mancanti}**\n\n")
     
-    msg += (f"✨ **ASCENSION**\n"
-            f"  └ Pet: `{p['asc']['pet']}%` | Mount: `{p['asc']['mount']}%` | Skill: `-{p['asc']['skill']}%`")
     await update.message.reply_text(msg, parse_mode="Markdown")
-
-async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [["Hammer", "Ghost"], ["Invasion", "Zombie"], ["FINE"]]
-    await update.message.reply_text("Seleziona il dungeon da configurare:", 
-        reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True))
-    return SETUP_CHOICE
-
-async def setup_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.lower()
-    if txt == "fine":
-        await update.message.reply_text("Setup completato!", reply_markup=ReplyKeyboardRemove())
-        return ConversationHandler.END
-    context.user_data["curr_s"] = txt
-    await update.message.reply_text(f"Inserisci: `STAGE.BATTLES` `RISORSE_PER_BATTAGLIA` (es: 11.11 45)")
-    return SETUP_VALUE
-
-async def save_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        st_ba, rew = update.message.text.split()
-        st = float(st_ba)
-        rew = int(rew)
-        p = get_p(context.bot_data, update.effective_user.id)
-        p["d"][context.user_data["curr_s"]].update({"st": st, "rew": rew})
-        await update.message.reply_text("✅ Salvato.")
-        return await start_setup(update, context)
-    except:
-        await update.message.reply_text("Formato errato. Riprova.")
-        return SETUP_VALUE
-
-async def start_strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Inserisci la tua forza (es: 45):")
-    return STRENGTH_INPUT
-
-async def save_strength(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        force = int(update.message.text)
-        p = get_p(context.bot_data, update.effective_user.id)
-        p["force"] = force
-        await update.message.reply_text(f"✅ Forza impostata a {force}!")
-        return ConversationHandler.END
-    except:
-        await update.message.reply_text("Inserisci un numero valido.")
-        return STRENGTH_INPUT
-
-async def start_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["u_list"] = list(TARGETS.keys())
-    return await ask_u(update, context)
-
-async def ask_u(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data["u_list"]:
-        await update.message.reply_text("Aggiornamento completato!")
-        return ConversationHandler.END
-    cur = context.user_data["u_list"][0]
-    await update.message.reply_text(f"Vittorie in **{cur.upper()}** (0-2)?")
-    return UPD_WINS
 
 async def process_u(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         wins = int(update.message.text)
-        if wins < 0 or wins > 2:
-            await update.message.reply_text("Inserisci 0, 1 o 2.")
-            return UPD_WINS
-        
+        uid = update.effective_user.id
         dk = context.user_data["u_list"].pop(0)
-        p = context.bot_data["players"][update.effective_user.id]["d"][dk]
+        p_full = get_p(context.bot_data, uid)
+        p = p_full["d"][dk]
         
-        if wins == 1:
-            p["rew"] += 5
-        elif wins == 2:
-            p["rew"] += 10
+        # Logica incremento
+        old_st = p["st"]
+        if wins > 0:
+            p["rew"] += (wins * 5)
+            p["st"] += (wins * 0.01)
         
-        p["st"] += (wins * 0.01)
-        
-        stage = int(p["st"])
-        battles = round((p["st"] - stage) * 100)
-        
-        if battles >= 15:
-            p["st"] = float(stage + 1)
-            await update.message.reply_text(f"🚀 STAGE UP! {dk} ora livello {stage + 1}")
+        # Log al canale
+        log_msg = (f"📈 **Update Giocatore:** {p_full['name']} (`{uid}`)\n"
+                   f"Dungeon: {dk.upper()}\n"
+                   f"Vittorie: {wins} | Nuovo Stage: {p['st']:.2f}")
+        await send_log(context, log_msg)
+
+        if not context.user_data["u_list"]:
+            await update.message.reply_text("✅ Tutti i dungeon aggiornati e loggati!")
+            return ConversationHandler.END
         
         return await ask_u(update, context)
     except:
-        await update.message.reply_text("Metti un numero (0, 1, 2).")
+        await update.message.reply_text("Inserisci un numero valido.")
         return UPD_WINS
 
-async def start_asc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Inserisci bonus: `PET%` `MOUNT%` `SKILL_RED%` (es: 10 5 15)")
-    return ASC_INPUT
-
-async def save_asc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        pe, mo, sk = map(int, update.message.text.split())
-        p = get_p(context.bot_data, update.effective_user.id)
-        p["asc"] = {"pet": pe, "mount": mo, "skill": sk}
-        await update.message.reply_text("✨ Bonus aggiornati!")
-        return ConversationHandler.END
-    except:
-        return ASC_INPUT
+# --- MAIN ---
 
 def main():
-    app = Application.builder().token("8719290481:AAHME7D5aEvXL9-tIuuGYRlDzXgBPFh0_Ck").build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
+    # Persistenza dati su file
+    pers = PicklePersistence(filepath="warriors_database.pickle")
     
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("setup", start_setup)],
-        states={SETUP_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, setup_choice)],
-                SETUP_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_setup)]},
-        fallbacks=[]))
+    app = Application.builder().token("TUO_TOKEN_QUI").persistence(pers).build()
 
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("strength", start_strength)],
-        states={STRENGTH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_strength)]},
-        fallbacks=[]))
-
-    app.add_handler(ConversationHandler(
+    # ConversationHandlers (Setup, Strength, Update, Ascension)
+    # [Qui vanno aggiunti i ConversationHandler come nel codice precedente]
+    
+    # Esempio per Update
+    update_conv = ConversationHandler(
         entry_points=[CommandHandler("update", start_update)],
         states={UPD_WINS: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_u)]},
-        fallbacks=[]))
-    
-    app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("ascension", start_asc)],
-        states={ASC_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_asc)]},
-        fallbacks=[]))
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)]
+    )
 
-    print("Bot online...")
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(update_conv)
+    # ... aggiungi gli altri handler ...
+
+    print("Gilda Manager Online...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+    
