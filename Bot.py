@@ -1,15 +1,14 @@
-import os
 import sqlite3
 import logging
 import re
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler,
     Filters, ConversationHandler, CallbackContext
 )
 
 # --- CONFIG ---
-TOKEN = "8719290481:AAF-BDk9j-idnkbgM0IMIyPbRqLukCNCQMU"
+TOKEN = "8719290481:AAFFYUVZMIpXD9dGbQ4ZUEs3r9xsS2tWGh0"
 ID_CANALE = "-1003578874292"
 
 # Stati
@@ -43,8 +42,10 @@ def init_db():
 def estrai_numeri(testo: str):
     return re.findall(r"\d+(?:[.,]\d+)?", testo.replace(',', '.'))
 
+
 def to_float(s: str):
     return float(s)
+
 
 def parse_two_ints(text: str):
     t = text.strip()
@@ -170,23 +171,8 @@ def get_d4(update: Update, context: CallbackContext):
     d2 = context.user_data["d2"]
     d3 = context.user_data["d3"]
 
-    with sqlite3.connect(DB_PATH) as conn:
-       conn.execute(
-    "CREATE TABLE IF NOT EXISTS player_data ("
-    "user_id INTEGER PRIMARY KEY,"
-    "potenza TEXT,"
-    "m_min REAL,"
-    "o_sec REAL,"
-    "h_max REAL,"
-    "d1_s INTEGER, d1_b INTEGER,"
-    "d2_s INTEGER, d2_b INTEGER,"
-    "d3_s INTEGER, d3_b INTEGER,"
-    "d4_s INTEGER, d4_b INTEGER,"
-    "risorse TEXT)"
-)
-# Salva D4
+    # Salva D4
     context.user_data["d4"] = [s, b]
-
     d4 = context.user_data["d4"]
 
     # Salvataggio nel DB
